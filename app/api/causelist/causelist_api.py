@@ -60,7 +60,6 @@ def generate_causelist(estcode):
         return error_response('judge_not_found', f"No  found matching '{judge}'.", status=404)
 
     court_no = judge_court_no.court_no
-    print(court_no)
 
     # Fetch cases from base tables
     query = (

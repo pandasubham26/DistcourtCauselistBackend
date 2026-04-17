@@ -9,6 +9,7 @@ from app.api.causelist.causelist_api import causelist_bp
 from app.api.master.dop_master_api import dop_master_bp
 from app.api.master.master_api import master_bp
 from app.api.search.global_search_api import search_bp
+from app.api.dashboard.dashboard_api import dashboard_bp
 from app.cli import create_superadmin
 from app.config import config
 from app.errors import register_error_handlers
@@ -78,6 +79,7 @@ def create_app(config_name='development'):
     app.register_blueprint(dop_master_bp, url_prefix='/api/<estcode>/cis')
     app.register_blueprint(causelist_bp, url_prefix='/api/<estcode>/causelist')
     app.register_blueprint(search_bp, url_prefix='/api/<estcode>/global/search')
+    app.register_blueprint(dashboard_bp, url_prefix='/api/<estcode>/dashboard')
 
     register_error_handlers(app)
 
