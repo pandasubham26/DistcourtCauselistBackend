@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 from flask import Blueprint, request, current_app, send_file
 from flask_jwt_extended import get_jwt, jwt_required
+from sqlalchemy import asc, desc, or_, and_
 from werkzeug.utils import secure_filename
 
 from app.estcode_db import get_cis_db_key
@@ -111,6 +112,20 @@ def upload_casefile_by_csv_or_excel(estcode):
         current_app.logger.exception('Error fetching user list')
         return error_response('server_error', f'An unexpected error occurred in {e}', status=500)
 
+def parse_case_search(search: str):
+    parts = search.strip().split()
+    casetype = None
+    casenumber = None
+    caseyear = None
+    for part in parts:
+        if part.isdigit() and len(part) == 4:
+            caseyear = part
+        elif part.isdigit():
+            casenumber = part
+        else:
+            casetype = part
+    return casetype, casenumber, caseyear
+
 
 @bulkupload_casefile_bp.route('/up/getcasefilelist', methods=['GET'])
 @jwt_required()
@@ -123,76 +138,132 @@ def get_casefile_list(estcode):
                 'Invalid establishment code',
                 status=403
             )
-        
-        page = request.args.get('page', default=1, type=int)
-        page_size = request.args.get('page_size', default=10, type=int)
-        search = (request.args.get('search') or '').strip().lower()
-        sort_key = request.args.get('sort_key', 'name').strip().lower()
-        sort_dir = request.args.get('sort_dir', 'asc').strip().lower()
 
-        if page < 1:
-            return error_response('validation_error', 'Page must be at least 1', status=400)
-        if page_size < 1 or page_size > 100:
-            return error_response('validation_error', 'Page size must be between 1 and 100', status=400)
+        page = request.args.get("page", default=1, type=int)
+        limit = request.args.get("limit", default=10, type=int)
+        status = request.args.get("status", default="", type=str)
+        search = request.args.get("search", default="")
+        sort_by = request.args.get("sortBy", default="uploaded_at", type=str)
+        order = request.args.get("order", default="desc", type=str)
 
-        allowed_sort_keys = {'id', 'barcode', 'cis_case_type', 'reg_case_type', 'cis_case_no', 'reg_case_no',
-                             'cis_case_year', 'reg_case_year'}
-        if sort_key not in allowed_sort_keys:
-            sort_key = 'barcode'
+        if page < 1 or limit < 1:
+            return error_response(
+                "validation_error",
+                "Page and limit must be greater than 0",
+                400
+            )
 
-        # Fetch all users
+        sort_columns = {
+            "reg_case_type": CaseFileHeader.reg_case_type,
+            "reg_case_no": CaseFileHeader.reg_case_no,
+            "reg_case_year": CaseFileHeader.reg_case_year,
+            "cis_case_type": CaseFileHeader.cis_case_type,
+            "cis_case_no": CaseFileHeader.cis_case_no,
+            "cis_case_year": CaseFileHeader.cis_case_year,
+            "casestatus": CaseFileHeader.status
+        }
+
+        sort_column = sort_columns.get(sort_by, CaseFileHeader.uploaded_at)
+
+        order = order.lower()
+        if order not in ["asc", "desc"]:
+            order = "asc"
+        order_func = asc if order.lower() == "asc" else desc
+
         query = CaseFileHeader.query.filter(CaseFileHeader.display == 'Y')
 
         if search:
-            query = query.filter(
-                db.or_(
-                    db.func.lower(CaseFileHeader.barcode).contains(search),
-                    db.func.lower(CaseFileHeader.cis_case_type).contains(search),
-                    db.func.lower(CaseFileHeader.reg_case_type).contains(search),
-                    db.func.lower(db.cast(CaseFileHeader.cis_case_no, db.String)).contains(search),
-                    db.func.lower(db.cast(CaseFileHeader.reg_case_no, db.String)).contains(search),
-                    db.func.lower(db.cast(CaseFileHeader.cis_case_year, db.String)).contains(search),
-                    db.func.lower(db.cast(CaseFileHeader.reg_case_year, db.String)).contains(search)
+            casetype, casenumber, caseyear = parse_case_search(search)
+            filters = []
+
+            if casenumber is not None and caseyear is not None:
+                if casetype:
+                    filters.append(or_(
+                        CaseFileHeader.reg_case_type.ilike(f"%{casetype}%"),
+                        CaseFileHeader.cis_case_type.ilike(f"%{casetype}%")
+                    ))
+                if casenumber:
+                    filters.append(or_(
+                        CaseFileHeader.reg_case_no == int(casenumber),
+                        CaseFileHeader.cis_case_no == int(casenumber)
+                    ))
+                if caseyear:
+                    filters.append(or_(
+                        CaseFileHeader.reg_case_year == int(caseyear),
+                        CaseFileHeader.cis_case_year == int(caseyear)
+                    ))
+                if casetype or casenumber or caseyear:
+                    query = query.filter(and_(*filters))
+            else:
+                pattern = f"%{search.strip()}%"
+                query = query.filter(
+                    or_(
+                        CaseFileHeader.reg_case_type.ilike(pattern),
+                        CaseFileHeader.reg_case_no.cast(db.String).ilike(pattern),
+                        CaseFileHeader.reg_case_year.cast(db.String).ilike(pattern),
+                        CaseFileHeader.status.ilike(pattern),
+                        CaseFileHeader.cino.ilike(pattern),
+                        CaseFileHeader.pet_name.ilike(pattern),
+                        CaseFileHeader.pet_adv.ilike(pattern),
+                        CaseFileHeader.res_name.ilike(pattern),
+                        CaseFileHeader.res_adv.ilike(pattern),
+                        CaseFileHeader.barcode.ilike(pattern)
+                    )
                 )
+
+        if status != 'All':
+            query = query.filter(
+                CaseFileHeader.status.ilike(status.strip())
             )
 
-        sort_column = getattr(CaseFileHeader, sort_key, CaseFileHeader.barcode)
-        if sort_dir == 'desc':
-            sort_column = sort_column.desc()
-
-        query = query.order_by(sort_column)
-
         total = query.count()
-        pages = (total + page_size - 1) // page_size
-        casefile = query.offset((page - 1) * page_size).limit(page_size).all()
 
-        # If no users found
-        if not casefile:
+        files = (
+            query
+            .order_by(order_func(sort_column))
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .all()
+        )
+
+        if not files:
             return error_response(
                 details={
                     'casefile': [],
-                    'paginations': {
-                        'total': 0,
-                        'page': page,
-                        'page_size': page_size,
-                        'pages': 0
-                    }
+                    "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total": total,
+                    "pages": (total + limit - 1) // limit
+                },
+                "filters": {
+                    "search": search,
+                    "status": status,
+                    "sortBy": sort_by,
+                    "order": order
+                }
                 },
                 error='no_casefile',
                 message='No case-file found',
                 status=404
             )
 
-        casefile_list = casefile_upload_schema.dump(casefile, many=True)
+        casefile_list = casefile_upload_schema.dump(files, many=True)
         # Serialize with schema (many=True for lists)
         return success_response(
             data={
                 'casefile': casefile_list,
-                'paginations': {
-                    'total': total,
-                    'page': page,
-                    'page_size': page_size,
-                    'pages': (total + page_size - 1)
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total": total,
+                    "pages": (total + limit - 1) // limit
+                },
+                "filters": {
+                    "search": search,
+                    "status": status,
+                    "sortBy": sort_by,
+                    "order": order
                 }
             },
             message='case file fetched successfully',
@@ -200,39 +271,51 @@ def get_casefile_list(estcode):
         )
 
     except Exception:
-        current_app.logger.exception('Error fetching user list')
+        current_app.logger.exception('Error fetching case list')
         return error_response('server_error', 'An unexpected error occurred', status=500)
 
 
 @bulkupload_casefile_bp.route('/up/updatecasefiledetails', methods=['PUT'])
 @jwt_required()
-def put_casefile_list():
+def put_casefile_list(estcode):
     try:
+        jwt_estcode = get_jwt().get('estcode')
+        if jwt_estcode != estcode:
+            return error_response(
+                'forbidden',
+                'Invalid establishment code',
+                status=403
+            )
+
         request_data = request.get_json()
 
         if not request_data:
             return error_response(error='invalid_request', message='Request data missing', status=400)
 
-        barcode = request_data.get('barcode')
+        id = request_data.get('id')
 
-        if not barcode:
+        if not id:
             return error_response(error='invalid_barcode', message='Invalid barcode selected', status=400)
 
-        existing_case = CaseFileHeader.query.filter_by(barcode=barcode).first()
+        existing_case = CaseFileHeader.query.filter_by(id=id).first()
 
         if not existing_case:
             return error_response(error='not_found', message='Case not found for the selected barcode', status=404)
 
-        cis_case_type = CaseTypeT.query.filter_by(type_name=existing_case.cis_case_type).first()
+        db_key = get_cis_db_key(estcode)
+        CaseTypeT = get_cis_model(db_key, 'case_type_t')
+        CivilT = get_cis_model(db_key, 'civil_t')
 
-        if not cis_case_type:
+        reg_case_type = CaseTypeT.query.filter_by(type_name=existing_case.reg_case_type).first()
+
+        if not reg_case_type:
             return error_response(error='not_found', message='Case type not found in CIS mapping table',
                                   status=404)
 
         cis_civil_case = CivilT.query.filter_by(
-            regcase_type=cis_case_type.case_type,
-            reg_no=existing_case.cis_case_no,
-            reg_year=existing_case.cis_case_year
+            regcase_type=reg_case_type.case_type,
+            reg_no=existing_case.reg_case_no,
+            reg_year=existing_case.reg_case_year
         ).first()
 
         if not cis_civil_case:
@@ -275,9 +358,9 @@ def get_case_file_pdf(estcode):
             return error_response('invalid_request', 'Missing required query parameters', 400)
 
         header = CaseFileHeader.query.filter_by(
-            reg_case_type=casetype,
-            reg_case_no=caseno,
-            reg_case_year=caseyear,
+            cis_case_type=casetype,
+            cis_case_no=caseno,
+            cis_case_year=caseyear,
             display='Y'
         ).first()
 
@@ -547,13 +630,13 @@ def put_casefile_list_all(estcode):
         if not request_data:
             return error_response(error='invalid_request', message='Request data missing', status=400)
 
-        barcode = request_data.get('barcode')
+        ids = request_data.get('ids')
 
-        if not barcode:
+        if not ids:
             return error_response(error='invalid_barcode', message='Invalid barcode selected', status=400)
 
-        for r in barcode:
-            existing_case = CaseFileHeader.query.filter_by(barcode=r).first()
+        for r in ids:
+            existing_case = CaseFileHeader.query.filter_by(id=r).first()
 
             if not existing_case:
                 return error_response(error='not_found', message='Case not found for the selected barcode', status=404)
@@ -562,16 +645,16 @@ def put_casefile_list_all(estcode):
             CaseTypeT = get_cis_model(db_key, 'case_type_t')
             CivilT = get_cis_model(db_key, 'civil_t')
 
-            cis_case_type = CaseTypeT.query.filter_by(type_name=existing_case.cis_case_type).first()
+            reg_case_type = CaseTypeT.query.filter_by(type_name=existing_case.reg_case_type).first()
 
-            if not cis_case_type:
+            if not reg_case_type:
                 return error_response(error='not_found', message='Case type not found in CIS mapping table',
                                       status=404)
 
             cis_civil_case = CivilT.query.filter_by(
-                regcase_type=cis_case_type.case_type,
-                reg_no=existing_case.cis_case_no,
-                reg_year=existing_case.cis_case_year
+                regcase_type=reg_case_type.case_type,
+                reg_no=existing_case.reg_case_no,
+                reg_year=existing_case.reg_case_year
             ).first()
 
             if not cis_civil_case:

@@ -738,6 +738,7 @@ def create_user(estcode):
     try:
         db.session.add(user)
         db.session.commit()
+        return success_response(None, 'User Added Successfully', 200)
     except IntegrityError:
         db.session.rollback()
         current_app.logger.exception('Integrity error while creating user')
