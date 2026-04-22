@@ -12,9 +12,7 @@ from werkzeug.utils import secure_filename
 from app.estcode_db import get_cis_db_key
 from app.extensions import db
 from app.models.casefile.casefile_uploads import CaseFileHeader, CaseFileDetail
-from app.models.casefile.civil_t import CivilT
 from app.models.cis.registry import get_cis_model
-from app.models.master.case_type_t import CaseTypeT
 from app.models.master.judge import Judge_Name
 from app.schemas.casefile_upload_schema import casefile_upload_schema
 from app.utils import error_response, success_response
