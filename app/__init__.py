@@ -98,7 +98,8 @@ def create_app(config_name='development'):
                                                             "casefile_detail", 
                                                             "causelist", 
                                                             "register_r1",
-                                                            "audit_log"
+                                                            "audit_log",
+                                                            "register_r34"
                                                             ])
             except Exception:
                 app.logger.exception('Failed to auto-create main DB tables')

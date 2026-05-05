@@ -1,10 +1,12 @@
+from app.schemas.register_r_thirty_four_schema import register_r_thirty_four_schema
+from app.schemas.register_r_twenty_schema import register_r_twenty_schema
 from app.schemas.register_r_one_schema import register_r_one_schema
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from datetime import datetime
 from sqlalchemy import asc, desc, or_, and_, func
 from app.extensions import db
-from app.models.register.register_r1_model import RegisterROne
+from app.models.register.register_r1_model import RegisterROne, RegisterRThirtyFour, RegisterRTwenty
 from app.utils import success_response, error_response, require_group, log_action
 
 register_r1_bp = Blueprint(
@@ -25,7 +27,6 @@ def parse_date(date_value):
 
 @register_r1_bp.route("/create", methods=["POST"])
 @jwt_required()
-@require_group(min_group="readandwrite")
 def create_register_r1(estcode):
     try:
         jwt_estcode = get_jwt().get('estcode')
@@ -355,6 +356,546 @@ def get_register_r1_list_by_court(estcode):
         return error_response(
             error="server_error",
             message="Failed to retrieve Register R1 entries:" + str(e),
+            details=str(e),
+            status=500
+        )
+    
+
+@register_r1_bp.route("/creatertwentyregister", methods=["POST"])
+@jwt_required()
+def create_register_r20(estcode):
+    try:
+        jwt_estcode = get_jwt().get('estcode')
+        if jwt_estcode != estcode:
+            return error_response(
+                'forbidden',
+                'Invalid establishment code',
+                status=403
+            )
+        user_id = get_jwt_identity()
+        data = request.get_json()
+
+        if not data:
+            return error_response(
+                error="validation_error",
+                message="Request payload is required",
+                status=400
+            )
+
+        # Required field validation
+        required_fields = [
+            "court_name",
+            "consecutive_no",
+            "case_number",
+            "parties"
+        ]
+
+        missing_fields = [
+            field for field in required_fields
+            if not data.get(field)
+        ]
+
+        if missing_fields:
+            return error_response(
+                error="validation_error",
+                message="Required fields are missing",
+                details={
+                    "missing_fields": missing_fields
+                },
+                status=400
+            )
+
+        register_entry = RegisterRTwenty(
+            court_name=data.get("court_name"),
+            consecutive_no=data.get("consecutive_no"),
+            case_number=data.get("case_number"),
+            parties=data.get("parties"),
+
+            decision_date=parse_date(
+                data.get("decision_date")
+            ),
+            file_details=data.get("file_details"),
+            disposed_date=parse_date(
+                data.get("disposed_date")
+            ),
+            shelf_details=data.get("shelf_details"),
+            remarks=data.get("remarks"),
+        )
+
+        db.session.add(register_entry)
+        db.session.commit()
+
+        # Audit logging
+        log_action(
+            actor_user_id=user_id,
+            action="CREATE_REGISTER_R20",
+            entity="register_r20",
+            entity_id=register_entry.id,
+            details={
+                "case_number": register_entry.case_number,
+                "consecutive_no": register_entry.consecutive_no,
+                "court_name": register_entry.court_name
+            }
+        )
+
+        return success_response(
+            data=register_entry.to_dict(),
+            message="Register R20 entry created successfully",
+            status=200
+        )
+
+    except Exception as e:
+        db.session.rollback()
+
+        return error_response(
+            error="server_error",
+            message="Failed to create Register R20 entry",
+            details=str(e),
+            status=500
+        )
+
+
+@register_r1_bp.route("/getrtwentyregisterlist", methods=["GET", "OPTIONS"])
+@jwt_required(optional=True)
+def get_register_r20_list(estcode):
+
+    try:
+        # Handle preflight request
+        if request.method == "OPTIONS":
+            return "", 200
+
+        # Validate establishment code
+        jwt_estcode = get_jwt().get("estcode")
+        if jwt_estcode != estcode:
+            return error_response(
+                error="forbidden",
+                message="Invalid establishment code",
+                status=403
+            )
+
+        # Query params
+        page = request.args.get("page", default=1, type=int)
+        limit = request.args.get("limit", default=10, type=int)
+        status = request.args.get("status", default="", type=str)
+        search = request.args.get("search", default="", type=str)
+        sort_by = request.args.get("sortBy", default="created_at", type=str)
+        order = request.args.get("order", default="desc", type=str)
+        courtname = request.args.get("courtname", default="", type=str)
+
+        if page < 1 or limit < 1:
+            return error_response(
+                error="validation_error",
+                message="Page and limit must be greater than 0",
+                status=400
+            )
+
+        # Sorting
+        sort_columns = {
+            "court_name": RegisterRTwenty.court_name
+        }
+
+        sort_column = sort_columns.get(
+            sort_by,
+            RegisterRTwenty.created_at
+        )
+
+        order_func = asc if order.lower() == "asc" else desc
+
+        query = db.session.query(
+            RegisterRTwenty.court_name,
+            func.count(RegisterRTwenty.id).label("count")
+        )
+
+        # Case type filter
+        if courtname and courtname.lower() != "all":
+            query = query.filter(
+                RegisterRTwenty.court_name.ilike(f"%{courtname}%")
+            )
+
+        # Search filter
+        if search:
+            query = query.filter(
+                or_(
+                    RegisterRTwenty.serial_no.ilike(f"%{search}%"),
+                    RegisterRTwenty.suit_name.ilike(f"%{search}%"),
+                    RegisterRTwenty.plaintiff_name.ilike(f"%{search}%"),
+                    RegisterRTwenty.defendant_name.ilike(f"%{search}%"),
+                    RegisterRTwenty.court_name.ilike(f"%{search}%")
+                )
+            )
+
+        query = query.group_by(RegisterRTwenty.court_name)
+
+        total = query.count()
+
+        register_entries = (
+            query
+            .order_by(order_func(sort_column))
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .all()
+        )
+
+        response_data = [
+            {
+                "court_name": row.court_name,
+                "count": row.count
+            }
+            for row in register_entries
+        ]
+
+        # casefile_list = register_r_one_schema.dump(register_entries, many=True)
+
+        response_data = {
+            "registers": response_data,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "pages": (total + limit - 1) // limit
+            },
+            "filters": {
+                "search": search,
+                "status": status,
+                "courtname": courtname,
+                "sortBy": sort_by,
+                "order": order
+            }
+        }
+
+        return success_response(
+            data=response_data,
+            message="Register R20 entries retrieved successfully",
+            status=200
+        )
+
+    except Exception as e:
+        return error_response(
+            error="server_error",
+            message="Failed to retrieve Register R20 entries:" + str(e),
+            details=str(e),
+            status=500
+        )
+
+
+@register_r1_bp.route("/getrtwentyregisterlistbycourt", methods=["GET", "OPTIONS"])
+@jwt_required(optional=True)
+def get_register_r20_list_by_court(estcode):
+    
+    try:
+        # Handle preflight request
+        if request.method == "OPTIONS":
+            return "", 200
+
+        # Validate establishment code
+        jwt_estcode = get_jwt().get("estcode")
+        if jwt_estcode != estcode:
+            return error_response(
+                error="forbidden",
+                message="Invalid establishment code",
+                status=403
+            )
+
+        court_name = request.args.get("courtname", default="", type=str)
+
+        if not court_name:
+            return error_response(
+                error="validation_error",
+                message="court_name query parameter is required",
+                status=400
+            )
+        
+        if court_name:
+            query = RegisterRTwenty.query.filter(RegisterRTwenty.court_name == court_name)
+        
+        
+        total = query.count()
+
+        files = (
+            query.order_by(desc(RegisterRTwenty.created_at))
+            .all()
+        )
+
+        casefile_list = register_r_twenty_schema.dump(files, many=True)
+
+        return success_response(
+            data=casefile_list,
+            message="Register R20 entries retrieved successfully",
+            status=200
+        )
+
+    except Exception as e:
+        return error_response(
+            error="server_error",
+            message="Failed to retrieve Register R20 entries:" + str(e),
+            details=str(e),
+            status=500
+        )
+    
+
+@register_r1_bp.route("/createrthirtyfourregister", methods=["POST"])
+@jwt_required(optional=True)
+def create_register_r34(estcode):
+    try:
+        jwt_estcode = get_jwt().get('estcode')
+        if jwt_estcode != estcode:
+            return error_response(
+                'forbidden',
+                'Invalid establishment code',
+                status=403
+            )
+        user_id = get_jwt_identity()
+        data = request.get_json()
+
+        if not data:
+            return error_response(
+                error="validation_error",
+                message="Request payload is required",
+                status=400
+            )
+
+        # Required field validation
+        required_fields = [
+            "court_name",
+            "serial_no",
+            "transferred",
+            "order_ix",
+            "otherwise"
+        ]
+
+        missing_fields = [
+            field for field in required_fields
+            if not data.get(field)
+        ]
+
+        if missing_fields:
+            return error_response(
+                error="validation_error",
+                message="Required fields are missing",
+                details={
+                    "missing_fields": missing_fields
+                },
+                status=400
+            )
+        
+        register_entry = RegisterRThirtyFour (
+            court_name=data.get("court_name"),
+            serial_no=data.get("serial_no"),
+            transferred=data.get("transferred"),
+            order_ix=data.get("order_ix"),
+            otherwise=data.get("otherwise"),
+            without_days=data.get("without_days"),
+            remarks=data.get("remarks"),
+            ex_parte=data.get("ex_parte"),
+            award=data.get("award"),
+            dismissal=data.get("dismissal"),
+            admission_days=data.get("admission_days"),
+            compromise=data.get("compromise"),
+            compromise_days=data.get("compromise_days"),
+            plaintiff=data.get("plaintiff"),
+            defendant=data.get("defendant"),
+            trial_days=data.get("trial_days"),
+            arbitration=data.get("arbitration"),
+            total_days=data.get("total_days")
+        )
+        
+        db.session.add(register_entry)
+        db.session.commit()
+
+        # Audit logging
+        log_action(
+            actor_user_id=user_id,
+            action="CREATE_REGISTER_R34",
+            entity="register_r34",
+            entity_id=register_entry.id,
+            details={
+                "serial_no": register_entry.serial_no,
+                "transferred": register_entry.transferred,
+                "court_name": register_entry.court_name,
+                "otherwise": register_entry.otherwise,
+                "order_ix": register_entry.order_ix
+            }
+        )
+
+        return success_response(
+            data=register_entry.to_dict(),
+            message="Register R34 entry created successfully",
+            status=200
+        )
+    except Exception as e:
+        db.session.rollback()
+
+        return error_response(
+            error="server_error",
+            message="Failed to create Register R34 entry",
+            details=str(e),
+            status=500
+        )
+
+
+@register_r1_bp.route("/getrthirtyfourregisterlist", methods=["GET", "OPTIONS"])
+@jwt_required(optional=True)
+def get_register_r34_list(estcode):
+
+    try:
+        # Handle preflight request
+        if request.method == "OPTIONS":
+            return "", 200
+
+        # Validate establishment code
+        jwt_estcode = get_jwt().get("estcode")
+        if jwt_estcode != estcode:
+            return error_response(
+                error="forbidden",
+                message="Invalid establishment code",
+                status=403
+            )
+
+        # Query params
+        page = request.args.get("page", default=1, type=int)
+        limit = request.args.get("limit", default=10, type=int)
+        status = request.args.get("status", default="", type=str)
+        search = request.args.get("search", default="", type=str)
+        sort_by = request.args.get("sortBy", default="created_at", type=str)
+        order = request.args.get("order", default="desc", type=str)
+
+        if page < 1 or limit < 1:
+            return error_response(
+                error="validation_error",
+                message="Page and limit must be greater than 0",
+                status=400
+            )
+
+        # Sorting
+        sort_columns = {
+            "court_name": RegisterRThirtyFour.court_name
+        }
+
+        sort_column = sort_columns.get(
+            sort_by,
+            RegisterRThirtyFour.created_at
+        )
+
+        order_func = asc if order.lower() == "asc" else desc
+
+        query = db.session.query(
+            RegisterRThirtyFour.court_name,
+            func.count(RegisterRThirtyFour.id).label("count")
+        )
+
+        
+
+        # Search filter
+        if search:
+            query = query.filter(
+                or_(
+                    RegisterRThirtyFour.court_name.ilike(f"%{search}%")
+                )
+            )
+
+        query = query.group_by(RegisterRThirtyFour.court_name)
+
+        total = query.count()
+
+        register_entries = (
+            query
+            .order_by(order_func(sort_column))
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .all()
+        )
+
+        response_data = [
+            {
+                "court_name": row.court_name,
+                "count": row.count
+            }
+            for row in register_entries
+        ]
+
+        # casefile_list = register_r_one_schema.dump(register_entries, many=True)
+
+        response_data = {
+            "registers": response_data,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "pages": (total + limit - 1) // limit
+            },
+            "filters": {
+                "search": search,
+                "status": status,
+                "sortBy": sort_by,
+                "order": order
+            }
+        }
+
+        return success_response(
+            data=response_data,
+            message="Register R34 entries retrieved successfully",
+            status=200
+        )
+
+    except Exception as e:
+        return error_response(
+            error="server_error",
+            message="Failed to retrieve Register R34 entries:" + str(e),
+            details=str(e),
+            status=500
+        )
+
+
+@register_r1_bp.route("/getrthirtyfourregisterlistbycourt", methods=["GET", "OPTIONS"])
+@jwt_required(optional=True)
+def get_register_r34_list_by_court(estcode):
+    
+    try:
+        # Handle preflight request
+        if request.method == "OPTIONS":
+            return "", 200
+
+        # Validate establishment code
+        jwt_estcode = get_jwt().get("estcode")
+        if jwt_estcode != estcode:
+            return error_response(
+                error="forbidden",
+                message="Invalid establishment code",
+                status=403
+            )
+
+        court_name = request.args.get("court_name", default="", type=str)
+
+        if not court_name:
+            return error_response(
+                error="validation_error",
+                message="court_name query parameter is required",
+                status=400
+            )
+        
+        if court_name:
+            query = RegisterRThirtyFour.query.filter(RegisterRThirtyFour.court_name == court_name)
+        
+        
+        total = query.count()
+
+        files = (
+            query.order_by(desc(RegisterRThirtyFour.created_at))
+            .all()
+        )
+
+        casefile_list = register_r_thirty_four_schema.dump(files, many=True)
+
+        return success_response(
+            data=casefile_list,
+            message="Register R34 entries retrieved successfully",
+            status=200
+        )
+
+    except Exception as e:
+        return error_response(
+            error="server_error",
+            message="Failed to retrieve Register R34 entries:" + str(e),
             details=str(e),
             status=500
         )

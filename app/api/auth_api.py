@@ -1,5 +1,5 @@
 from flask import Blueprint, request, current_app
-from flask_jwt_extended import create_access_token
+from flask_jwt_extended import create_access_token, get_jwt, get_jwt_identity, jwt_required
 from sqlalchemy.exc import IntegrityError
 from app.extensions import db
 from app.schemas.user_schema import user_schema, ALLOWED_ROLES
@@ -122,3 +122,28 @@ def create_user():
 
     # use schema to jsonify user as data
     return success_response(data=user_schema.dump(user), message='User created', status=200)
+
+
+@authentication_bp.route('/refresh', methods=['POST'])
+@jwt_required(refresh=True)
+def refresh_token():
+    try:
+        identity = get_jwt_identity()
+        claims = get_jwt()
+
+        new_access_token = create_access_token(
+            identity=identity,
+            additional_claims={
+                'estcode': claims.get('estcode'),
+                'role': claims.get('role')
+            }
+        )
+
+        return success_response(
+            data={'access_token': new_access_token},
+            message='Token refreshed successfully',
+            status=200
+        )
+
+    except Exception as e:
+        return error_response('refresh_failed', 'Invalid refresh token', status=401)

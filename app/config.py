@@ -13,8 +13,9 @@ class BaseConfig:
     SECRET_KEY = os.getenv('SECRET_KEY', '47ZMOcbXG0hr89tJR_VWma_82S_fHCRXXdLo7Ib0P6Kw6kk6AgYp7devbO6_A6PK')
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', '58EruUQ6jWZNzrlHISZ7W1BpsPJLJmUXBFfXC8FTDXW5n0sZtalW-ZloabLW1_Qv')
 
-    JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=30)
-    JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=7)
+
+    JWT_ACCESS_TOKEN_EXPIRES = 3600        # 1 hour
+    JWT_REFRESH_TOKEN_EXPIRES = 86400      # 1 day
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     JSON_SORT_KEYS = False
