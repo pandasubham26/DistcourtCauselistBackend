@@ -8,7 +8,7 @@ class User(db.Model):
     __tablename__ = 'users'
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
+    username = db.Column(db.String(80), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     estcode = db.Column(db.String(6), nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
@@ -16,6 +16,8 @@ class User(db.Model):
     role = db.Column(db.String(20), nullable=False)
     isactive = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
+    court_no = db.Column(db.Integer, nullable=True)
+    designation = db.Column(db.String(120), nullable=True)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -38,4 +40,6 @@ class User(db.Model):
             'role': self.role,
             'isactive': self.isactive,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+            'court_no': self.court_no,
+            'designation': self.designation
         }

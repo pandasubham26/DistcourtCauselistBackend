@@ -25,6 +25,15 @@ def generate_causelist(estcode):
     date = request.args.get('date')
     judge = request.args.get('judge')
     type = request.args.get('type')
+    court_no = None
+    judge_name = None
+
+    if judge and '|' in judge:
+        court_no, judge_name = judge.split('|', 1)
+
+        court_no_select = court_no.strip()
+        judge_name = judge_name.strip()
+
 
     db_key = get_cis_db_key(estcode)
     Judge_Name = get_cis_model(db_key, 'judge_name_t')
@@ -36,30 +45,6 @@ def generate_causelist(estcode):
 
     if not date or not judge or not type:
         return error_response('missing_parameters', "Both 'date' and 'judge' and 'type' are required parameters.", status=400)
-
-    # Find judge code
-    judge_record = (
-        db.session.query(Judge_Name)
-        .filter(Judge_Name.judge_name.ilike(f"%{judge}%"))
-        .first()
-    )
-
-    if not judge_record:
-        return error_response('judge_not_found', f"No judge found matching '{judge}'.", status=404)
-
-    jocode = judge_record.judge_code
-
-    judge_court_no = (
-        db.session.query(JudgeWithCourtNo)
-        .filter(JudgeWithCourtNo.judge_code == jocode,
-                JudgeWithCourtNo.to_dt.is_(None))
-        .first()
-    )
-
-    if not judge_court_no:
-        return error_response('judge_not_found', f"No  found matching '{judge}'.", status=404)
-
-    court_no = judge_court_no.court_no
 
     # Fetch cases from base tables
     query = (
@@ -84,10 +69,9 @@ def generate_causelist(estcode):
         .join(CaseTypeT, CaseTypeT.case_type == CivilT.regcase_type)
         .filter(
             and_(
-                # DailyProc.next_date == date,
                 CivilT.date_next_list == date,
                 CaseTypeT.type_flag == type,
-                CivilT.court_no == court_no
+                CivilT.court_no == court_no_select
 
             )
         )
@@ -95,9 +79,10 @@ def generate_causelist(estcode):
     )
 
     results = query.all()
+    print(results)
 
     if not results:
-        return error_response('not_found', f"No cases found for Judge '{judge}' on {date}.", status=404)
+        return error_response('not_found', f"No cases found for Judge '{judge_name}' on {date}.", status=404)
 
     inserted = 0
     skipped = 0
@@ -177,7 +162,7 @@ def generate_causelist(estcode):
     ]
 
     return success_response(
-        message=f"Causelist fetched for Judge '{judge}' on {date}.",
+        message=f"Causelist fetched for Judge '{judge_name}' on {date}.",
         data={
             "inserted_records": inserted,
             "skipped_duplicates": skipped,

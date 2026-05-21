@@ -8,6 +8,7 @@ from app.api.casefile.casefile_upload_api import bulkupload_casefile_bp
 from app.api.causelist.causelist_api import causelist_bp
 from app.api.master.dop_master_api import dop_master_bp
 from app.api.master.master_api import master_bp
+from app.api.register.criminal_register_routes import register_r_bp
 from app.api.search.global_search_api import search_bp
 from app.api.dashboard.dashboard_api import dashboard_bp
 from app.api.register.register_r1_routes import register_r1_bp
@@ -85,6 +86,7 @@ def create_app(config_name='development'):
     app.register_blueprint(search_bp, url_prefix='/api/<estcode>/global/search')
     app.register_blueprint(dashboard_bp, url_prefix='/api/<estcode>/dashboard')
     app.register_blueprint(register_r1_bp, url_prefix='/api/<estcode>/register/r1')
+    app.register_blueprint(register_r_bp, url_prefix='/api/<estcode>/register/criminal')
     register_error_handlers(app)
 
     # ----------------------------------------
@@ -99,7 +101,10 @@ def create_app(config_name='development'):
                                                             "causelist", 
                                                             "register_r1",
                                                             "audit_log",
-                                                            "register_r34"
+                                                            "register_r34",
+                                                            "register_r20",
+                                                            "criminal_register_r1",
+                                                            "criminal_register_r3"
                                                             ])
             except Exception:
                 app.logger.exception('Failed to auto-create main DB tables')

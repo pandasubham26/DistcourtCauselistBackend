@@ -360,9 +360,9 @@ def get_case_file_pdf(estcode):
             return error_response('invalid_request', 'Missing required query parameters', 400)
 
         header = CaseFileHeader.query.filter_by(
-            reg_case_type=casetype,
-            reg_case_no=caseno,
-            reg_case_year=caseyear,
+            cis_case_type=casetype,
+            cis_case_no=caseno,
+            cis_case_year=caseyear,
             display='Y'
         ).first()
 
@@ -416,9 +416,9 @@ def get_case_file_details(estcode):
             return error_response('invalid_request', 'Missing required query parameters', 400)
 
         header = CaseFileHeader.query.filter_by(
-            reg_case_type=casetype,
-            reg_case_no=caseno,
-            reg_case_year=caseyear,
+            cis_case_type=casetype,
+            cis_case_no=caseno,
+            cis_case_year=caseyear,
             display='Y'
         ).first()
 
@@ -587,7 +587,13 @@ def upload_zip(estcode):
                 db.session.add(header)
                 db.session.flush()
 
-            dest_dir = os.path.join(project_root, "static", "casefiles", court, reg_case_year)
+            dest_dir = os.path.join(
+                str(project_root),
+                "static",
+                "casefiles",
+                str(court),
+                str(cis_case_year)
+            )
             os.makedirs(dest_dir, exist_ok=True)
 
             dest_path = os.path.join(dest_dir, pdfname)

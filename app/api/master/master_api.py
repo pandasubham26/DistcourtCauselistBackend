@@ -707,8 +707,20 @@ def create_user(estcode):
         )
 
     json_data = request.get_json() or {}
-    if 'payload' in json_data:
-        json_data = json_data.get('payload', {})
+    judge_value = json_data.get('judge', '')
+    court_no = None
+    judge_name = None
+    designation = None
+
+    court_part, remaining = judge_value.split(')', 1)
+    court_no = court_part.replace('(', '').strip()
+    if '-' in remaining:
+        judge_name, designation = remaining.split('-', 1)
+
+        judge_name = judge_name.strip()
+        designation = designation.strip()
+    else:
+        judge_name = remaining.strip()
 
     # validation using schema
     errors = user_schema.validate(json_data)
@@ -720,12 +732,25 @@ def create_user(estcode):
     if role not in ALLOWED_ROLES:
         return error_response('validation_error', 'Invalid role', details={'role': [f"Role must be one of: {', '.join(ALLOWED_ROLES)}"]}, status=400)
 
+    existing_email = User.query.filter_by(
+        email=json_data['email']
+    ).first()
+
+    if existing_email:
+        return error_response(
+            'conflict',
+            'Email already exists',
+            status=409
+        )
+
     # create user object
     user = User(
         username=json_data['username'],
         email=json_data['email'],
         estcode=estcode,
-        judge=json_data.get('judge'),
+        judge=judge_name,
+        court_no=court_no,
+        designation=designation,
         role=role,
     )
 
@@ -739,10 +764,6 @@ def create_user(estcode):
         db.session.add(user)
         db.session.commit()
         return success_response(None, 'User Added Successfully', 200)
-    except IntegrityError:
-        db.session.rollback()
-        current_app.logger.exception('Integrity error while creating user')
-        return error_response('conflict', 'username or email already exists', status=409)
     except Exception:
         db.session.rollback()
         current_app.logger.exception('Unexpected error while creating user')
