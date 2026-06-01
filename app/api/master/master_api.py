@@ -832,4 +832,93 @@ def update_user_status(estcode, user_id):
         200
     )
 
-    
+
+@master_bp.route('/us/edituser/<int:user_id>', methods=['PUT', 'OPTIONS'])
+@jwt_required(optional=True)
+def edit_user(estcode, user_id):
+    # handle CORS preflight first
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    jwt_estcode = get_jwt().get('estcode')
+
+    if jwt_estcode != estcode:
+        return error_response(
+            'forbidden',
+            'Invalid establishment code',
+            status=403
+        )
+
+    json_data = request.get_json() or {}
+    user = User.query.filter_by(id=user_id, estcode=estcode).first()
+
+    if not user:
+        return error_response(
+            'not_found',
+            'User not found',
+            status=404
+        )
+
+    judge_value = json_data.get('judge', '')
+    court_no = None
+    judge_name = None
+    designation = None
+
+    if judge_value:
+        try:
+            court_part, remaining = judge_value.split(')', 1)
+            court_no = court_part.replace('(', '').strip()
+
+            if '-' in remaining:
+                judge_name, designation = remaining.split('-', 1)
+                judge_name = judge_name.strip()
+                designation = designation.strip()
+            else:
+                judge_name = remaining.strip()
+        except ValueError:
+            judge_name = judge_value.strip()
+
+    role = (json_data.get('role') or user.role or '').lower()
+
+    if role not in ALLOWED_ROLES:
+        return error_response(
+            'validation_error',
+            'Invalid role',
+            details={'role': [f"Role must be one of: {', '.join(ALLOWED_ROLES)}"]},
+            status=400
+        )
+
+    existing_email = User.query.filter(
+        User.email == json_data.get('email'),
+        User.id != user_id
+    ).first()
+
+    if existing_email:
+        return error_response(
+            'conflict',
+            'Email already exists',
+            status=409
+        )
+
+    user.username = json_data.get('username', user.username)
+    user.email = json_data.get('email', user.email)
+    user.role = role
+    user.estcode = json_data.get('est_code')
+
+    if judge_value:
+        user.judge = judge_name
+        user.court_no = court_no
+        user.designation = designation
+
+    try:
+        db.session.commit()
+        return success_response(None, 'User Updated Successfully', 200)
+
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception('Unexpected error while updating user')
+        return error_response(
+            'server_error',
+            'An unexpected error occurred',
+            status=500
+        )

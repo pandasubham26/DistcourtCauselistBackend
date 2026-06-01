@@ -79,7 +79,6 @@ def generate_causelist(estcode):
     )
 
     results = query.all()
-    print(results)
 
     if not results:
         return error_response('not_found', f"No cases found for Judge '{judge_name}' on {date}.", status=404)

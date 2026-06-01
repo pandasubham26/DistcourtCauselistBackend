@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 from flask import Blueprint, request, current_app, send_file
 from flask_jwt_extended import get_jwt, jwt_required
-from sqlalchemy import asc, desc, or_, and_
+from sqlalchemy import asc, desc, or_, and_, func
 from werkzeug.utils import secure_filename
 
 from app.estcode_db import get_cis_db_key
@@ -22,6 +22,7 @@ bulkupload_casefile_bp = Blueprint('bulkupload_casefile_bp', __name__)
 ALLOWED_ZIP_EXTENSIONS = {".zip"}
 ALLOWED_EXCEL_EXTENSIONS = {".xls", ".xlsx"}
 ALLOWED_PDF_EXTENSIONS = {".pdf"}
+
 
 def generate_bulk_no(estcode):
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -110,6 +111,7 @@ def upload_casefile_by_csv_or_excel(estcode):
         current_app.logger.exception('Error fetching user list')
         return error_response('server_error', f'An unexpected error occurred in {e}', status=500)
 
+
 def parse_case_search(search: str):
     parts = search.strip().split()
     casetype = None
@@ -178,38 +180,63 @@ def get_casefile_list(estcode):
             casetype, casenumber, caseyear = parse_case_search(search)
             filters = []
 
-            if casenumber is not None and caseyear is not None:
-                if casetype:
-                    filters.append(or_(
-                        CaseFileHeader.reg_case_type.ilike(f"%{casetype}%"),
-                        CaseFileHeader.cis_case_type.ilike(f"%{casetype}%")
-                    ))
-                if casenumber:
-                    filters.append(or_(
-                        CaseFileHeader.reg_case_no == int(casenumber),
-                        CaseFileHeader.cis_case_no == int(casenumber)
-                    ))
-                if caseyear:
-                    filters.append(or_(
-                        CaseFileHeader.reg_case_year == int(caseyear),
-                        CaseFileHeader.cis_case_year == int(caseyear)
-                    ))
-                if casetype or casenumber or caseyear:
-                    query = query.filter(and_(*filters))
+            def normalize_case_type(column):
+                return func.replace(func.replace(func.lower(func.trim(func.coalesce(column, ''))), '.', ''), ' ', '')
+
+            reg_type = normalize_case_type(CaseFileHeader.reg_case_type)
+            cis_type = normalize_case_type(CaseFileHeader.cis_case_type)
+
+            ct = None
+            if casetype:
+                ct = casetype.strip().lower().replace(".", "").replace(" ", "")
+            if ct and casenumber is None and caseyear is None:
+                query = query.filter(
+                    or_(
+                        reg_type.like(f"{ct}%"),
+                        cis_type.like(f"{ct}%")
+                    )
+                )
+            elif ct or casenumber is not None or caseyear is not None:
+                if ct:
+                    filters.append(
+                        or_(
+                            reg_type.like(f"{ct}%"),
+                            cis_type.like(f"{ct}%")
+                        )
+                    )
+                if casenumber is not None:
+                    filters.append(
+                        or_(
+                            CaseFileHeader.reg_case_no == int(casenumber),
+                            CaseFileHeader.cis_case_no == int(casenumber)
+                        )
+                    )
+                if caseyear is not None:
+                    filters.append(
+                        or_(
+                            CaseFileHeader.reg_case_year == int(caseyear),
+                            CaseFileHeader.cis_case_year == int(caseyear)
+                        )
+                    )
+                query = query.filter(and_(*filters))
             else:
                 pattern = f"%{search.strip()}%"
                 query = query.filter(
                     or_(
-                        CaseFileHeader.reg_case_type.ilike(pattern),
+                        func.coalesce(CaseFileHeader.reg_case_type, '').ilike(pattern),
                         CaseFileHeader.reg_case_no.cast(db.String).ilike(pattern),
                         CaseFileHeader.reg_case_year.cast(db.String).ilike(pattern),
-                        CaseFileHeader.status.ilike(pattern),
-                        CaseFileHeader.cino.ilike(pattern),
-                        CaseFileHeader.pet_name.ilike(pattern),
-                        CaseFileHeader.pet_adv.ilike(pattern),
-                        CaseFileHeader.res_name.ilike(pattern),
-                        CaseFileHeader.res_adv.ilike(pattern),
-                        CaseFileHeader.barcode.ilike(pattern)
+                        func.coalesce(CaseFileHeader.cis_case_type, '').ilike(pattern),
+                        CaseFileHeader.cis_case_no.cast(db.String).ilike(pattern),
+                        CaseFileHeader.cis_case_year.cast(db.String).ilike(pattern),
+                        func.coalesce(CaseFileHeader.status, '').ilike(pattern),
+                        func.coalesce(CaseFileHeader.cino, '').ilike(pattern),
+                        func.coalesce(CaseFileHeader.judge, '').ilike(pattern),
+                        func.coalesce(CaseFileHeader.pet_name, '').ilike(pattern),
+                        func.coalesce(CaseFileHeader.pet_adv, '').ilike(pattern),
+                        func.coalesce(CaseFileHeader.res_name, '').ilike(pattern),
+                        func.coalesce(CaseFileHeader.res_adv, '').ilike(pattern),
+                        func.coalesce(CaseFileHeader.barcode, '').ilike(pattern)
                     )
                 )
 
@@ -233,17 +260,17 @@ def get_casefile_list(estcode):
                 details={
                     'casefile': [],
                     "pagination": {
-                    "page": page,
-                    "limit": limit,
-                    "total": total,
-                    "pages": (total + limit - 1) // limit
-                },
-                "filters": {
-                    "search": search,
-                    "status": status,
-                    "sortBy": sort_by,
-                    "order": order
-                }
+                        "page": page,
+                        "limit": limit,
+                        "total": total,
+                        "pages": (total + limit - 1) // limit
+                    },
+                    "filters": {
+                        "search": search,
+                        "status": status,
+                        "sortBy": sort_by,
+                        "order": order
+                    }
                 },
                 error='no_casefile',
                 message='No case-file found',
@@ -316,8 +343,8 @@ def put_casefile_list(estcode):
 
         cis_civil_case = CivilT.query.filter_by(
             regcase_type=reg_case_type.case_type,
-            reg_no=existing_case.reg_case_no,
-            reg_year=existing_case.reg_case_year
+            reg_no=existing_case.cis_case_no,
+            reg_year=existing_case.cis_case_year
         ).first()
 
         if not cis_civil_case:
@@ -440,10 +467,9 @@ def get_case_file_details(estcode):
 
 @bulkupload_casefile_bp.route("/up/uploadcasefilebyzip", methods=["POST"])
 def upload_zip(estcode):
-
     if "file" not in request.files:
         return error_response("not_found", "no file part", 404)
-    
+
     db_key = get_cis_db_key(estcode)
     Judge_Name = get_cis_model(db_key, 'judge_name_t')
 
@@ -531,7 +557,7 @@ def upload_zip(estcode):
         required_cols = ["BARCODE", "CIS CASE TYPE", "CIS CASE NUMBER", "CIS CASE YEAR",
                          "REG CASE TYPE", "REG CASE NUMBER", "REG CASE YEAR",
                          "PAGE COUNT", "COURT NAME", "FILE PATH",
-                        ]
+                         ]
 
         for col in required_cols:
             if col not in df.columns:
@@ -661,8 +687,8 @@ def put_casefile_list_all(estcode):
 
             cis_civil_case = CivilT.query.filter_by(
                 regcase_type=reg_case_type.case_type,
-                reg_no=existing_case.reg_case_no,
-                reg_year=existing_case.reg_case_year
+                reg_no=existing_case.cis_case_no,
+                reg_year=existing_case.cis_case_year
             ).first()
 
             if not cis_civil_case:
