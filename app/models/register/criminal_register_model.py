@@ -54,7 +54,7 @@ class CriminalRegisterRThree(db.Model):
     date_of_institution = db.Column(db.Date, nullable=False)
     date_of_receipt = db.Column(db.Date, nullable=False)
     complainant_name = db.Column(db.String(100), nullable=False)
-    accused_count = db.Column(db.Integer, nullable=False)
+    accused_count = db.Column(db.String(100), nullable=False)
     nature_section = db.Column(db.Text)
     final_order_date = db.Column(db.Text)
     appeal_revision_result = db.Column(db.Text)
@@ -167,5 +167,45 @@ class CriminalRegisterRThirteen(db.Model):
             "disposed_shelved_date": str(self.disposed_shelved_date) if self.disposed_shelved_date else None,
             "shelf_rack_no": self.shelf_rack_no,
             "destruction_date": str(self.destruction_date) if self.destruction_date else None,
+            "remarks": self.remarks
+        }
+
+
+class CriminalRegisterRSeven(db.Model):
+    __tablename__ = "criminal_register_r7"
+
+    id = db.Column(db.Integer, primary_key=True, index=True)
+    serial_no = db.Column(db.Integer, nullable=False)
+    nature_of_documents = db.Column(db.String(255), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    case_number = db.Column(db.String(100), nullable=False)
+    est_code = db.Column(db.String(20), nullable=False)
+    judge = db.Column(db.String(255), nullable=False)
+    court_name = db.Column(db.String(255), nullable=False)
+    process_fee_rs = db.Column(db.Integer, default=0)
+    process_fee_ps = db.Column(db.Integer, default=0)
+    affidavit_fee_rs = db.Column(db.Integer, default=0)
+    affidavit_fee_ps = db.Column(db.Integer, default=0)
+    other_fee_rs = db.Column(db.Integer, default=0)
+    other_fee_ps = db.Column(db.Integer, default=0)
+    remarks = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "est_code": self.est_code,
+            "court_name": self.court_name,
+            "nature_of_documents": self.nature_of_documents,
+            "affidavit_fee_ps": self.affidavit_fee_ps,
+            "case_number": self.case_number,
+            "serial_no": self.serial_no,
+            "judge": self.judge,
+            "process_fee_rs": self.process_fee_rs,
+            "process_fee_ps": self.process_fee_ps,
+            "affidavit_fee_rs": self.affidavit_fee_rs,
+            "date": str(self.date) if self.date else None,
+            "other_fee_rs": self.other_fee_rs,
+            "other_fee_ps": self.other_fee_ps,
             "remarks": self.remarks
         }
