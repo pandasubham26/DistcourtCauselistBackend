@@ -8,12 +8,16 @@ from app.estcode_db import get_cis_db_key
 from app.extensions import db
 from app.models.cis.registry import get_cis_model
 from app.models.register.criminal_register_model import CriminalRegisterROne, CriminalRegisterRThree, \
-    CriminalRegisterREight, CriminalRegisterRThirteen, CriminalRegisterRSeven
+    CriminalRegisterREight, CriminalRegisterRThirteen, CriminalRegisterRSeven, CriminalRegisterRTwo, \
+    CriminalRegisterRNineA, CriminalRegisterRTenA, CriminalRegisterRThirteenA
 from app.schemas.criminal_r_eight_register_schema import register_r8_schema
 from app.schemas.criminal_r_one_register_schema import criminal_register_r_one_schema
 from app.schemas.criminal_r_seven_schema import register_r7_schema
 from app.schemas.criminal_r_thirteen_register_schema import criminal_register_r13_schema
 from app.schemas.criminal_r_three_register_schema import criminal_register_r_three_schema
+from app.schemas.criminal_register_r10a_schema import criminal_register_r10a_schema
+from app.schemas.criminal_register_r2_schema import criminal_register_r_two_schema
+from app.schemas.criminal_register_r9a_schema import criminal_register_r9a_schema
 from app.utils import error_response, success_response, log_action
 
 register_r_bp = Blueprint(
@@ -1482,7 +1486,6 @@ def get_case_details_by_no_yr_r13(estcode):
         )
 
 
-
 @register_r_bp.route("/getsevenregisterlist", methods=["GET", "OPTIONS"])
 @jwt_required(optional=True)
 def get_register_r7_list(estcode):
@@ -1745,7 +1748,7 @@ def get_case_details_by_no_yr_r7(estcode):
             )
         query = CriminalRegisterRSeven.query.filter(CriminalRegisterRSeven.judge == judge)
         files = (
-            query.order_by(desc(CriminalRegisterRSeven.created_at))
+            query.order_by(asc(CriminalRegisterRSeven.created_at))
             .all()
         )
 
@@ -1768,6 +1771,1171 @@ def get_case_details_by_no_yr_r7(estcode):
         return error_response(
             error="server_error",
             message="Failed to retrieve Register R7 entries:" + str(e),
+            details=str(e),
+            status=500
+        )
+
+
+@register_r_bp.route("/getrtworegisterlist", methods=["GET", "OPTIONS"])
+@jwt_required(optional=True)
+def get_register_r2_list(estcode):
+
+    try:
+        # Handle preflight request
+        if request.method == "OPTIONS":
+            return "", 200
+
+        # Validate establishment code
+        jwt_estcode = get_jwt().get("estcode")
+        if jwt_estcode != estcode:
+            return error_response(
+                error="forbidden",
+                message="Invalid establishment code",
+                status=403
+            )
+
+        # Query params
+        page = request.args.get("page", default=1, type=int)
+        limit = request.args.get("limit", default=10, type=int)
+        status = request.args.get("status", default="", type=str)
+        search = request.args.get("search", default="", type=str)
+        sort_by = request.args.get("sortBy", default="created_at", type=str)
+        order = request.args.get("order", default="desc", type=str)
+        judge = request.args.get("judge", default="", type=str)
+
+        if page < 1 or limit < 1:
+            return error_response(
+                error="validation_error",
+                message="Page and limit must be greater than 0",
+                status=400
+            )
+
+        # Sorting
+        sort_columns = {
+            "created_at": CriminalRegisterRTwo.created_at,
+            "court_name": CriminalRegisterRTwo.court_name
+        }
+
+        sort_column = sort_columns.get(
+            sort_by,
+            CriminalRegisterRTwo.created_at
+        )
+
+        order_func = asc if order.lower() == "asc" else desc
+
+        query = db.session.query(
+            CriminalRegisterRTwo.court_name,
+            func.count(CriminalRegisterRTwo.id).label("count")
+        )
+
+        # Case type filter
+        if judge:
+            query = query.filter(
+                CriminalRegisterRTwo.auth_judge.ilike(f"%{judge}%")
+            )
+
+        # Search filter
+        if search:
+            query = query.filter(
+                or_(
+                    CriminalRegisterRTwo.serial_no.ilike(f"%{search}%"),
+                    CriminalRegisterRTwo.party_names.ilike(f"%{search}%"),
+                    CriminalRegisterRTwo.crime_information.ilike(f"%{search}%"),
+                    CriminalRegisterRTwo.police_station.ilike(f"%{search}%"),
+                )
+            )
+
+        query = query.group_by(CriminalRegisterRTwo.court_name)
+
+        total = query.count()
+
+        register_entries = (
+            query
+            .order_by(order_func(sort_column))
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .all()
+        )
+
+        response_data = [
+            {
+                "court_name": row.court_name,
+                "count": row.count
+            }
+            for row in register_entries
+        ]
+
+        # casefile_list = register_r_one_schema.dump(register_entries, many=True)
+
+        response_data = {
+            "registers": response_data,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "pages": (total + limit - 1) // limit
+            },
+            "filters": {
+                "search": search,
+                "status": status,
+                "judge": judge,
+                "sortBy": sort_by,
+                "order": order
+            }
+        }
+
+        return success_response(
+            data=response_data,
+            message="Register R2 entries retrieved successfully",
+            status=200
+        )
+
+    except Exception as e:
+        return error_response(
+            error="server_error",
+            message="Failed to retrieve Register R2 entries:" + str(e),
+            details=str(e),
+            status=500
+        )
+
+
+@register_r_bp.route("/createcriminalrtworegister", methods=["POST"])
+@jwt_required()
+def cri_create_register_r2(estcode):
+    try:
+        jwt_estcode = get_jwt().get('estcode')
+        if jwt_estcode != estcode:
+            return error_response(
+                'forbidden',
+                'Invalid establishment code',
+                status=403
+            )
+        user_id = get_jwt_identity()
+        data = request.get_json()
+
+        if not data:
+            return error_response(
+                error="validation_error",
+                message="Request payload is required",
+                status=400
+            )
+
+        # Required field validation
+        required_fields = [
+            "serial_no",
+            "case_no",
+            "police_station",
+            "receipt_date",
+            "auth_estcode",
+            "auth_judge",
+            "court_name",
+            "party_names",
+            "police_investigation_return",
+            "crime_information"
+        ]
+
+        missing_fields = [
+            field for field in required_fields
+            if not data.get(field)
+        ]
+
+        if missing_fields:
+            return error_response(
+                error="validation_error",
+                message="Required fields are missing" + missing_fields,
+                details={
+                    "missing_fields": missing_fields
+                },
+                status=400
+            )
+
+        register_entry = CriminalRegisterRTwo(
+            court_name=data.get("court_name"),
+            case_no=data.get("case_no"),
+            auth_estcode=data.get("auth_estcode"),
+            auth_judge=data.get("auth_judge"),
+            serial_no=data.get("serial_no"),
+            police_station=data.get("police_station"),
+            receipt_date=parse_date(data.get("receipt_date")),
+            crime_information=data.get("crime_information"),
+            party_names=data.get('party_names'),
+            police_investigation_return=data.get("police_investigation_return"),
+            preliminary_order=data.get('preliminary_order'),
+            final_order=data.get('final_order'),
+            remarks=data.get("remarks"),
+        )
+
+        db.session.add(register_entry)
+        db.session.commit()
+
+        # Audit logging
+        log_action(
+            actor_user_id=user_id,
+            action="CREATE_REGISTER_R2",
+            entity="criminal_register_r2",
+            entity_id=register_entry.id,
+            details={
+                "serial_no": register_entry.serial_no,
+                "police_station": register_entry.police_station,
+                "judge": register_entry.auth_judge,
+                "court_name": register_entry.court_name,
+                "case_number": register_entry.case_no,
+                "crime_information": register_entry.crime_information,
+                "party_names": register_entry.party_names
+            }
+        )
+
+        return success_response(
+            data=register_entry.to_dict(),
+            message="Register R2 entry created successfully",
+            status=200
+        )
+
+    except Exception as e:
+        db.session.rollback()
+
+        return error_response(
+            error="server_error",
+            message="Failed to create Register R2 entry",
+            details=str(e),
+            status=500
+        )
+
+
+@register_r_bp.route("/getrtworegisterlistbycourt", methods=["GET", "OPTIONS"])
+@jwt_required(optional=True)
+def get_case_details_by_no_yr_r2(estcode):
+    try:
+        # Handle preflight request
+        if request.method == "OPTIONS":
+            return "", 200
+
+        # Validate establishment code
+        jwt_estcode = get_jwt().get("estcode")
+        if jwt_estcode != estcode:
+            return error_response(
+                error="forbidden",
+                message="Invalid establishment code",
+                status=403
+            )
+
+        court_name = request.args.get('court_name')
+        judge = request.args.get('judge')
+
+        if not court_name:
+            return error_response(
+                'validation_error',
+                'Court name is required',
+                status=400
+            )
+
+        query = CriminalRegisterRTwo.query.filter(CriminalRegisterRTwo.court_name == court_name)
+
+        if not judge:
+            return error_response(
+                'validation_error',
+                'Judge is required',
+                status=400
+            )
+        query = CriminalRegisterRTwo.query.filter(CriminalRegisterRTwo.auth_judge == judge)
+        files = (
+            query.order_by(asc(CriminalRegisterRTwo.created_at))
+            .all()
+        )
+
+        if not files:
+            return error_response(
+                'not_found',
+                'Case details not found',
+                status=404
+            )
+
+        casefile_list = criminal_register_r_two_schema.dump(files, many=True)
+
+        return success_response(
+            data=casefile_list,
+            message='Case details fetched successfully',
+            status=200
+        )
+
+    except Exception as e:
+        return error_response(
+            error="server_error",
+            message="Failed to retrieve Register R2 entries:" + str(e),
+            details=str(e),
+            status=500
+        )
+
+
+
+@register_r_bp.route("/getrninearegisterlist", methods=["GET", "OPTIONS"])
+@jwt_required(optional=True)
+def get_register_r9a_list(estcode):
+
+    try:
+        # Handle preflight request
+        if request.method == "OPTIONS":
+            return "", 200
+
+        # Validate establishment code
+        jwt_estcode = get_jwt().get("estcode")
+        if jwt_estcode != estcode:
+            return error_response(
+                error="forbidden",
+                message="Invalid establishment code",
+                status=403
+            )
+
+        # Query params
+        page = request.args.get("page", default=1, type=int)
+        limit = request.args.get("limit", default=10, type=int)
+        status = request.args.get("status", default="", type=str)
+        search = request.args.get("search", default="", type=str)
+        sort_by = request.args.get("sortBy", default="created_at", type=str)
+        order = request.args.get("order", default="desc", type=str)
+        judge = request.args.get("judge", default="", type=str)
+
+        if page < 1 or limit < 1:
+            return error_response(
+                error="validation_error",
+                message="Page and limit must be greater than 0",
+                status=400
+            )
+
+        # Sorting
+        sort_columns = {
+            "created_at": CriminalRegisterRNineA.created_at,
+            "court_name": CriminalRegisterRNineA.court_name
+        }
+
+        sort_column = sort_columns.get(
+            sort_by,
+            CriminalRegisterRNineA.created_at
+        )
+
+        order_func = asc if order.lower() == "asc" else desc
+
+        query = db.session.query(
+            CriminalRegisterRNineA.court_name,
+            func.count(CriminalRegisterRNineA.id).label("count")
+        )
+
+        # Case type filter
+        if judge:
+            query = query.filter(
+                CriminalRegisterRNineA.auth_judge.ilike(f"%{judge}%")
+            )
+
+        # Search filter
+        if search:
+            query = query.filter(
+                or_(
+                    CriminalRegisterRNineA.serial_no.ilike(f"%{search}%"),
+                    CriminalRegisterRNineA.person_name.ilike(f"%{search}%"),
+                    CriminalRegisterRNineA.issue_date.ilike(f"%{search}%"),
+                    CriminalRegisterRNineA.returnable_date.ilike(f"%{search}%"),
+                )
+            )
+
+        query = query.group_by(CriminalRegisterRNineA.court_name)
+
+        total = query.count()
+
+        register_entries = (
+            query
+            .order_by(order_func(sort_column))
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .all()
+        )
+
+        response_data = [
+            {
+                "court_name": row.court_name,
+                "count": row.count
+            }
+            for row in register_entries
+        ]
+
+        # casefile_list = register_r_one_schema.dump(register_entries, many=True)
+
+        response_data = {
+            "registers": response_data,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "pages": (total + limit - 1) // limit
+            },
+            "filters": {
+                "search": search,
+                "status": status,
+                "judge": judge,
+                "sortBy": sort_by,
+                "order": order
+            }
+        }
+
+        return success_response(
+            data=response_data,
+            message="Register R9A entries retrieved successfully",
+            status=200
+        )
+
+    except Exception as e:
+        return error_response(
+            error="server_error",
+            message="Failed to retrieve Register R9A entries:" + str(e),
+            details=str(e),
+            status=500
+        )
+
+
+@register_r_bp.route("/createcriminalrninearegister", methods=["POST"])
+@jwt_required()
+def cri_create_register_r9a(estcode):
+    try:
+        jwt_estcode = get_jwt().get('estcode')
+        if jwt_estcode != estcode:
+            return error_response(
+                'forbidden',
+                'Invalid establishment code',
+                status=403
+            )
+        user_id = get_jwt_identity()
+        data = request.get_json()
+
+        if not data:
+            return error_response(
+                error="validation_error",
+                message="Request payload is required",
+                status=400
+            )
+
+        # Required field validation
+        required_fields = [
+            "serial_no",
+            "case_no",
+            "court_name",
+            "person_name",
+            "auth_estcode",
+            "auth_judge",
+            "nature_of_process",
+            "issue_date",
+            "returnable_date",
+            "receiver_date"
+        ]
+
+        missing_fields = [
+            field for field in required_fields
+            if not data.get(field)
+        ]
+
+        if missing_fields:
+            return error_response(
+                error="validation_error",
+                message="Required fields are missing" + missing_fields,
+                details={
+                    "missing_fields": missing_fields
+                },
+                status=400
+            )
+
+        register_entry = CriminalRegisterRNineA(
+            court_name=data.get("court_name"),
+            case_no=data.get("case_no"),
+            auth_estcode=data.get("auth_estcode"),
+            auth_judge=data.get("auth_judge"),
+            serial_no=data.get("serial_no"),
+            person_name=data.get("person_name"),
+            nature_of_process=data.get("nature_of_process"),
+            issue_date=parse_date(data.get("issue_date")),
+            returnable_date=parse_date(data.get("returnable_date")),
+            receiver_date=parse_date(data.get("receiver_date")),
+            return_date=parse_date(data.get("return_date")),
+            remarks=data.get("remarks"),
+        )
+
+        db.session.add(register_entry)
+        db.session.commit()
+
+        # Audit logging
+        log_action(
+            actor_user_id=user_id,
+            action="CREATE_REGISTER_R9A",
+            entity="criminal_register_r9a",
+            entity_id=register_entry.id,
+            details={
+                "serial_no": register_entry.serial_no,
+                "person_name": register_entry.person_name,
+                "judge": register_entry.auth_judge,
+                "court_name": register_entry.court_name,
+                "case_number": register_entry.case_no,
+                "issue_date": register_entry.issue_date,
+                "returnable_date": register_entry.returnable_date
+            }
+        )
+
+        return success_response(
+            data=register_entry.to_dict(),
+            message="Register R9A entry created successfully",
+            status=200
+        )
+
+    except Exception as e:
+        db.session.rollback()
+
+        return error_response(
+            error="server_error",
+            message="Failed to create Register R9A entry",
+            details=str(e),
+            status=500
+        )
+
+
+@register_r_bp.route("/getrninearegisterlistbycourt", methods=["GET", "OPTIONS"])
+@jwt_required(optional=True)
+def get_case_details_by_no_yr_r9a(estcode):
+    try:
+        # Handle preflight request
+        if request.method == "OPTIONS":
+            return "", 200
+
+        # Validate establishment code
+        jwt_estcode = get_jwt().get("estcode")
+        if jwt_estcode != estcode:
+            return error_response(
+                error="forbidden",
+                message="Invalid establishment code",
+                status=403
+            )
+
+        court_name = request.args.get('court_name')
+        judge = request.args.get('judge')
+
+        if not court_name:
+            return error_response(
+                'validation_error',
+                'Court name is required',
+                status=400
+            )
+
+        query = CriminalRegisterRNineA.query.filter(CriminalRegisterRNineA.court_name == court_name)
+
+        if not judge:
+            return error_response(
+                'validation_error',
+                'Judge is required',
+                status=400
+            )
+        query = CriminalRegisterRNineA.query.filter(CriminalRegisterRNineA.auth_judge == judge)
+        files = (
+            query.order_by(asc(CriminalRegisterRNineA.created_at))
+            .all()
+        )
+
+        if not files:
+            return error_response(
+                'not_found',
+                'Case details not found',
+                status=404
+            )
+
+        casefile_list = criminal_register_r9a_schema.dump(files, many=True)
+
+        return success_response(
+            data=casefile_list,
+            message='Case details fetched successfully',
+            status=200
+        )
+
+    except Exception as e:
+        return error_response(
+            error="server_error",
+            message="Failed to retrieve Register R9A entries:" + str(e),
+            details=str(e),
+            status=500
+        )
+
+
+
+@register_r_bp.route("/getrtenaregisterlist", methods=["GET", "OPTIONS"])
+@jwt_required(optional=True)
+def get_register_r10a_list(estcode):
+
+    try:
+        # Handle preflight request
+        if request.method == "OPTIONS":
+            return "", 200
+
+        # Validate establishment code
+        jwt_estcode = get_jwt().get("estcode")
+        if jwt_estcode != estcode:
+            return error_response(
+                error="forbidden",
+                message="Invalid establishment code",
+                status=403
+            )
+
+        # Query params
+        page = request.args.get("page", default=1, type=int)
+        limit = request.args.get("limit", default=10, type=int)
+        status = request.args.get("status", default="", type=str)
+        search = request.args.get("search", default="", type=str)
+        sort_by = request.args.get("sortBy", default="created_at", type=str)
+        order = request.args.get("order", default="desc", type=str)
+        judge = request.args.get("judge", default="", type=str)
+
+        if page < 1 or limit < 1:
+            return error_response(
+                error="validation_error",
+                message="Page and limit must be greater than 0",
+                status=400
+            )
+
+        # Sorting
+        sort_columns = {
+            "created_at": CriminalRegisterRTenA.created_at,
+            "court_name": CriminalRegisterRTenA.court_name
+        }
+
+        sort_column = sort_columns.get(
+            sort_by,
+            CriminalRegisterRTenA.created_at
+        )
+
+        order_func = asc if order.lower() == "asc" else desc
+
+        query = db.session.query(
+            CriminalRegisterRTenA.court_name,
+            func.count(CriminalRegisterRTenA.id).label("count")
+        )
+
+        # Case type filter
+        if judge:
+            query = query.filter(
+                CriminalRegisterRTenA.auth_judge.ilike(f"%{judge}%")
+            )
+
+        # Search filter
+        if search:
+            query = query.filter(
+                or_(
+                    CriminalRegisterRTenA.serial_no.ilike(f"%{search}%"),
+                    CriminalRegisterRTenA.case_no.ilike(f"%{search}%"),
+                    CriminalRegisterRTenA.issue_date.ilike(f"%{search}%"),
+                )
+            )
+
+        query = query.group_by(CriminalRegisterRTenA.court_name)
+
+        total = query.count()
+
+        register_entries = (
+            query
+            .order_by(order_func(sort_column))
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .all()
+        )
+
+        response_data = [
+            {
+                "court_name": row.court_name,
+                "count": row.count
+            }
+            for row in register_entries
+        ]
+
+        # casefile_list = register_r_one_schema.dump(register_entries, many=True)
+
+        response_data = {
+            "registers": response_data,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "pages": (total + limit - 1) // limit
+            },
+            "filters": {
+                "search": search,
+                "status": status,
+                "judge": judge,
+                "sortBy": sort_by,
+                "order": order
+            }
+        }
+
+        return success_response(
+            data=response_data,
+            message="Register R10A entries retrieved successfully",
+            status=200
+        )
+
+    except Exception as e:
+        return error_response(
+            error="server_error",
+            message="Failed to retrieve Register R9A entries:" + str(e),
+            details=str(e),
+            status=500
+        )
+
+
+@register_r_bp.route("/createcriminalrtenaregister", methods=["POST"])
+@jwt_required()
+def cri_create_register_r10a(estcode):
+    try:
+        jwt_estcode = get_jwt().get('estcode')
+        if jwt_estcode != estcode:
+            return error_response(
+                'forbidden',
+                'Invalid establishment code',
+                status=403
+            )
+        user_id = get_jwt_identity()
+        data = request.get_json()
+
+        if not data:
+            return error_response(
+                error="validation_error",
+                message="Request payload is required",
+                status=400
+            )
+
+        # Required field validation
+        required_fields = [
+            "serial_no",
+            "case_no",
+            "court_name",
+            "auth_estcode",
+            "auth_judge",
+            "trail_date",
+            "prosecution_witnesses",
+            "issue_date",
+            "mode_of_service",
+            "return_date"
+        ]
+
+        missing_fields = [
+            field for field in required_fields
+            if not data.get(field)
+        ]
+
+        if missing_fields:
+            return error_response(
+                error="validation_error",
+                message="Required fields are missing" + missing_fields,
+                details={
+                    "missing_fields": missing_fields
+                },
+                status=400
+            )
+
+        register_entry = CriminalRegisterRTenA(
+            auth_estcode=data.get("auth_estcode"),
+            auth_judge=data.get("auth_judge"),
+            court_name=data.get("court_name"),
+            serial_no=data.get("serial_no"),
+            case_no=data.get("case_no"),
+            trail_date=parse_date(data.get("trail_date")),
+            prosecution_witnesses=data.get("prosecution_witnesses"),
+            issue_date=parse_date(data.get("issue_date")),
+            mode_of_service=data.get("mode_of_service"),
+            return_date=parse_date(data.get("return_date")),
+            suf_insuff=data.get("suf_insuff"),
+            step_taken=data.get("step_taken"),
+            remarks=data.get("remarks"),
+        )
+
+        db.session.add(register_entry)
+        db.session.commit()
+
+        # Audit logging
+        log_action(
+            actor_user_id=user_id,
+            action="CREATE_REGISTER_R10A",
+            entity="criminal_register_r10a",
+            entity_id=register_entry.id,
+            details={
+                "serial_no": register_entry.serial_no,
+                "prosecution_witnesses": register_entry.prosecution_witnesses,
+                "judge": register_entry.auth_judge,
+                "court_name": register_entry.court_name,
+                "case_number": register_entry.case_no,
+                "issue_date": register_entry.issue_date,
+                "return_date": register_entry.return_date
+            }
+        )
+
+        return success_response(
+            data=register_entry.to_dict(),
+            message="Register R10A entry created successfully",
+            status=200
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        print(str(e))
+
+        return error_response(
+            error="server_error",
+            message="Failed to create Register R10A entry" + str(e),
+            details=str(e),
+            status=500
+        )
+
+
+@register_r_bp.route("/getrtenaregisterlistbycourt", methods=["GET", "OPTIONS"])
+@jwt_required(optional=True)
+def get_case_details_by_no_yr_r10a(estcode):
+    try:
+        # Handle preflight request
+        if request.method == "OPTIONS":
+            return "", 200
+
+        # Validate establishment code
+        jwt_estcode = get_jwt().get("estcode")
+        if jwt_estcode != estcode:
+            return error_response(
+                error="forbidden",
+                message="Invalid establishment code",
+                status=403
+            )
+
+        court_name = request.args.get('court_name')
+        judge = request.args.get('judge')
+
+        if not court_name:
+            return error_response(
+                'validation_error',
+                'Court name is required',
+                status=400
+            )
+
+        query = CriminalRegisterRTenA.query.filter(CriminalRegisterRTenA.court_name == court_name)
+
+        if not judge:
+            return error_response(
+                'validation_error',
+                'Judge is required',
+                status=400
+            )
+        query = CriminalRegisterRTenA.query.filter(CriminalRegisterRTenA.auth_judge == judge)
+        files = (
+            query.order_by(asc(CriminalRegisterRTenA.created_at))
+            .all()
+        )
+
+        if not files:
+            return error_response(
+                'not_found',
+                'Case details not found',
+                status=404
+            )
+
+        casefile_list = criminal_register_r10a_schema.dump(files, many=True)
+
+        return success_response(
+            data=casefile_list,
+            message='Case details fetched successfully',
+            status=200
+        )
+
+    except Exception as e:
+        return error_response(
+            error="server_error",
+            message="Failed to retrieve Register R9A entries:" + str(e),
+            details=str(e),
+            status=500
+        )
+
+
+@register_r_bp.route("/getrthirteenaregisterlist", methods=["GET", "OPTIONS"])
+@jwt_required(optional=True)
+def get_register_r13a_list(estcode):
+
+    try:
+        # Handle preflight request
+        if request.method == "OPTIONS":
+            return "", 200
+
+        # Validate establishment code
+        jwt_estcode = get_jwt().get("estcode")
+        if jwt_estcode != estcode:
+            return error_response(
+                error="forbidden",
+                message="Invalid establishment code",
+                status=403
+            )
+
+        # Query params
+        page = request.args.get("page", default=1, type=int)
+        limit = request.args.get("limit", default=10, type=int)
+        status = request.args.get("status", default="", type=str)
+        search = request.args.get("search", default="", type=str)
+        sort_by = request.args.get("sortBy", default="created_at", type=str)
+        order = request.args.get("order", default="desc", type=str)
+        judge = request.args.get("judge", default="", type=str)
+
+        if page < 1 or limit < 1:
+            return error_response(
+                error="validation_error",
+                message="Page and limit must be greater than 0",
+                status=400
+            )
+
+        # Sorting
+        sort_columns = {
+            "created_at": CriminalRegisterRThirteenA.created_at,
+            "court_name": CriminalRegisterRThirteenA.court_name
+        }
+
+        sort_column = sort_columns.get(
+            sort_by,
+            CriminalRegisterRThirteenA.created_at
+        )
+
+        order_func = asc if order.lower() == "asc" else desc
+
+        query = db.session.query(
+            CriminalRegisterRThirteenA.court_name,
+            func.count(CriminalRegisterRThirteenA.id).label("count")
+        )
+
+        # Case type filter
+        if judge:
+            query = query.filter(
+                CriminalRegisterRThirteenA.auth_judge.ilike(f"%{judge}%")
+            )
+
+        # Search filter
+        if search:
+            query = query.filter(
+                or_(
+                    CriminalRegisterRThirteenA.serial_no.ilike(f"%{search}%"),
+                    CriminalRegisterRThirteenA.case_no.ilike(f"%{search}%"),
+                    CriminalRegisterRThirteenA.issue_date.ilike(f"%{search}%"),
+                )
+            )
+
+        query = query.group_by(CriminalRegisterRThirteenA.court_name)
+
+        total = query.count()
+
+        register_entries = (
+            query
+            .order_by(order_func(sort_column))
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .all()
+        )
+
+        response_data = [
+            {
+                "court_name": row.court_name,
+                "count": row.count
+            }
+            for row in register_entries
+        ]
+
+        # casefile_list = register_r_one_schema.dump(register_entries, many=True)
+
+        response_data = {
+            "registers": response_data,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "pages": (total + limit - 1) // limit
+            },
+            "filters": {
+                "search": search,
+                "status": status,
+                "judge": judge,
+                "sortBy": sort_by,
+                "order": order
+            }
+        }
+
+        return success_response(
+            data=response_data,
+            message="Register R13A entries retrieved successfully",
+            status=200
+        )
+
+    except Exception as e:
+        return error_response(
+            error="server_error",
+            message="Failed to retrieve Register R13A entries:" + str(e),
+            details=str(e),
+            status=500
+        )
+
+
+@register_r_bp.route("/createcriminalrthirteenaregister", methods=["POST"])
+@jwt_required()
+def cri_create_register_r13a(estcode):
+    try:
+        jwt_estcode = get_jwt().get('estcode')
+        if jwt_estcode != estcode:
+            return error_response(
+                'forbidden',
+                'Invalid establishment code',
+                status=403
+            )
+        user_id = get_jwt_identity()
+        data = request.get_json()
+
+        if not data:
+            return error_response(
+                error="validation_error",
+                message="Request payload is required",
+                status=400
+            )
+
+        # Required field validation
+        required_fields = [
+            "serial_no",
+            "case_no",
+            "court_name",
+            "auth_estcode",
+            "auth_judge",
+            "trail_date",
+            "prosecution_witnesses",
+            "issue_date",
+            "mode_of_service",
+            "return_date"
+        ]
+
+        missing_fields = [
+            field for field in required_fields
+            if not data.get(field)
+        ]
+
+        if missing_fields:
+            return error_response(
+                error="validation_error",
+                message="Required fields are missing" + missing_fields,
+                details={
+                    "missing_fields": missing_fields
+                },
+                status=400
+            )
+
+        register_entry = CriminalRegisterRTenA(
+            auth_estcode=data.get("auth_estcode"),
+            auth_judge=data.get("auth_judge"),
+            court_name=data.get("court_name"),
+            serial_no=data.get("serial_no"),
+            case_no=data.get("case_no"),
+            trail_date=parse_date(data.get("trail_date")),
+            prosecution_witnesses=data.get("prosecution_witnesses"),
+            issue_date=parse_date(data.get("issue_date")),
+            mode_of_service=data.get("mode_of_service"),
+            return_date=parse_date(data.get("return_date")),
+            suf_insuff=data.get("suf_insuff"),
+            step_taken=data.get("step_taken"),
+            remarks=data.get("remarks"),
+        )
+
+        db.session.add(register_entry)
+        db.session.commit()
+
+        # Audit logging
+        log_action(
+            actor_user_id=user_id,
+            action="CREATE_REGISTER_R10A",
+            entity="criminal_register_r10a",
+            entity_id=register_entry.id,
+            details={
+                "serial_no": register_entry.serial_no,
+                "prosecution_witnesses": register_entry.prosecution_witnesses,
+                "judge": register_entry.auth_judge,
+                "court_name": register_entry.court_name,
+                "case_number": register_entry.case_no,
+                "issue_date": register_entry.issue_date,
+                "return_date": register_entry.return_date
+            }
+        )
+
+        return success_response(
+            data=register_entry.to_dict(),
+            message="Register R10A entry created successfully",
+            status=200
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        print(str(e))
+
+        return error_response(
+            error="server_error",
+            message="Failed to create Register R10A entry" + str(e),
+            details=str(e),
+            status=500
+        )
+
+
+@register_r_bp.route("/getrthirteenaregisterlistbycourt", methods=["GET", "OPTIONS"])
+@jwt_required(optional=True)
+def get_case_details_by_no_yr_r13a(estcode):
+    try:
+        # Handle preflight request
+        if request.method == "OPTIONS":
+            return "", 200
+
+        # Validate establishment code
+        jwt_estcode = get_jwt().get("estcode")
+        if jwt_estcode != estcode:
+            return error_response(
+                error="forbidden",
+                message="Invalid establishment code",
+                status=403
+            )
+
+        court_name = request.args.get('court_name')
+        judge = request.args.get('judge')
+
+        if not court_name:
+            return error_response(
+                'validation_error',
+                'Court name is required',
+                status=400
+            )
+
+        query = CriminalRegisterRTenA.query.filter(CriminalRegisterRTenA.court_name == court_name)
+
+        if not judge:
+            return error_response(
+                'validation_error',
+                'Judge is required',
+                status=400
+            )
+        query = CriminalRegisterRTenA.query.filter(CriminalRegisterRTenA.auth_judge == judge)
+        files = (
+            query.order_by(asc(CriminalRegisterRTenA.created_at))
+            .all()
+        )
+
+        if not files:
+            return error_response(
+                'not_found',
+                'Case details not found',
+                status=404
+            )
+
+        casefile_list = criminal_register_r10a_schema.dump(files, many=True)
+
+        return success_response(
+            data=casefile_list,
+            message='Case details fetched successfully',
+            status=200
+        )
+
+    except Exception as e:
+        return error_response(
+            error="server_error",
+            message="Failed to retrieve Register R9A entries:" + str(e),
             details=str(e),
             status=500
         )

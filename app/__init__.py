@@ -108,7 +108,11 @@ def create_app(config_name='development'):
                                                             "criminal_register_r6",
                                                             "criminal_register_r8",
                                                             "criminal_register_r13",
-                                                            "criminal_register_r7"
+                                                            "criminal_register_r7",
+                                                            "criminal_register_r2",
+                                                            "criminal_register_r9a",
+                                                            "criminal_register_r10a",
+                                                            "criminal_register_r13a"
                                                             ])
             except Exception:
                 app.logger.exception('Failed to auto-create main DB tables')
